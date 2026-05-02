@@ -31,6 +31,10 @@ const elements = {
     // Parse demo
     urlInput: document.getElementById('url-input'),
     parseBtn: document.getElementById('parse-btn'),
+    parseFormWrapper: document.getElementById('parse-form-wrapper'),
+    parseCompactBar: document.getElementById('parse-compact-bar'),
+    parseCompactUrl: document.getElementById('parse-compact-url'),
+    parseEditBtn: document.getElementById('parse-edit-btn'),
     
     // History
     historyList: document.getElementById('history-list'),
@@ -41,9 +45,29 @@ const elements = {
     resultsContent: document.getElementById('results-content'),
     closeResultsBtn: document.getElementById('close-results'),
     
-    // Loading
-    loadingOverlay: document.getElementById('loading-overlay')
+    resultsLoading: document.getElementById('results-loading')
 };
+
+/**
+ * Вкладки списков анализа (сильные / слабые / УТП / рекомендации) внутри #results-content
+ */
+function initResultTabs(root) {
+    const wrap = root.querySelector('[data-analysis-tabs]');
+    if (!wrap) return;
+
+    const activate = (tabId) => {
+        wrap.querySelectorAll('.analysis-tab-btn').forEach((btn) => {
+            btn.classList.toggle('active', btn.dataset.tab === tabId);
+        });
+        wrap.querySelectorAll('.analysis-tab-panel').forEach((panel) => {
+            panel.classList.toggle('active', panel.dataset.panel === tabId);
+        });
+    };
+
+    wrap.querySelectorAll('.analysis-tab-btn').forEach((btn) => {
+        btn.addEventListener('click', () => activate(btn.dataset.tab));
+    });
+}
 
 // === API Functions ===
 const api = {
@@ -95,12 +119,16 @@ const api = {
 const ui = {
     showLoading() {
         state.isLoading = true;
-        elements.loadingOverlay.style.display = 'flex';
+        elements.resultsSection.hidden = false;
+        if (elements.resultsLoading) elements.resultsLoading.hidden = false;
+        if (elements.resultsContent) elements.resultsContent.hidden = true;
+        elements.resultsSection.scrollIntoView({ behavior: 'smooth' });
     },
     
     hideLoading() {
         state.isLoading = false;
-        elements.loadingOverlay.style.display = 'none';
+        if (elements.resultsLoading) elements.resultsLoading.hidden = true;
+        if (elements.resultsContent) elements.resultsContent.hidden = false;
     },
     
     showTab(tabId) {
@@ -121,15 +149,35 @@ const ui = {
             this.loadHistory();
         }
     },
+
+    collapseParseForm(displayUrl) {
+        if (elements.parseCompactUrl) {
+            elements.parseCompactUrl.textContent = displayUrl;
+            elements.parseCompactUrl.title = displayUrl;
+        }
+        if (elements.parseFormWrapper) elements.parseFormWrapper.hidden = true;
+        if (elements.parseCompactBar) elements.parseCompactBar.hidden = false;
+    },
+
+    expandParseForm() {
+        if (elements.parseFormWrapper) elements.parseFormWrapper.hidden = false;
+        if (elements.parseCompactBar) elements.parseCompactBar.hidden = true;
+        if (elements.urlInput) elements.urlInput.focus();
+    },
     
     showResults(html) {
+        if (elements.resultsLoading) elements.resultsLoading.hidden = true;
+        if (elements.resultsContent) elements.resultsContent.hidden = false;
         elements.resultsContent.innerHTML = html;
+        initResultTabs(elements.resultsContent);
         elements.resultsSection.hidden = false;
         elements.resultsSection.scrollIntoView({ behavior: 'smooth' });
     },
     
     hideResults() {
         elements.resultsSection.hidden = true;
+        if (elements.resultsLoading) elements.resultsLoading.hidden = true;
+        if (elements.resultsContent) elements.resultsContent.hidden = false;
     },
     
     showError(message) {
@@ -147,13 +195,100 @@ const ui = {
     },
     
     renderTextAnalysis(analysis) {
+        const ds = analysis.design_score ?? 0;
+        const ux = analysis.ux_score ?? 0;
+        const hr = analysis.hr_relevance_score ?? 0;
+
+        const scoreCard = (label, value, cls = '') => `
+            <div class="analysis-score-card ${cls}">
+                <div class="analysis-score-card__label">${label}</div>
+                <div class="analysis-score-card__row">
+                    <span class="analysis-score-card__value">${value}/10</span>
+                    <div class="score-bar analysis-score-card__bar">
+                        <div class="score-fill" style="width: ${(value / 10) * 100}%"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const scoresSection = `
+            <div class="result-block result-block--scores">
+                <h3>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="20" x2="18" y2="10"/>
+                        <line x1="12" y1="20" x2="12" y2="4"/>
+                        <line x1="6" y1="20" x2="6" y2="14"/>
+                    </svg>
+                    Оценки (HR / карьера / EdTech)
+                </h3>
+                <div class="analysis-scores-grid">
+                    ${scoreCard('Дизайн и подача', ds)}
+                    ${scoreCard('UX (работодатель / кандидат)', ux)}
+                    ${scoreCard('Релевантность HR / найму', hr, 'analysis-score-card--full')}
+                </div>
+            </div>
+        `;
+
+        const audienceSection = analysis.target_audience ? `
+            <div class="result-block result-block--compact">
+                <h3>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
+                    Целевая аудитория
+                </h3>
+                <p>${analysis.target_audience}</p>
+            </div>
+        ` : '';
+
+        const tabSections = [
+            { key: 'strengths', label: 'Сильные стороны', items: analysis.strengths },
+            { key: 'weaknesses', label: 'Слабые стороны', items: analysis.weaknesses },
+            { key: 'unique', label: 'Уникальные предложения', items: analysis.unique_offers },
+            { key: 'recommendations', label: 'Рекомендации', items: analysis.recommendations }
+        ].filter((s) => s.items && s.items.length > 0);
+
+        let listsTabsSection = '';
+        if (tabSections.length > 0) {
+            const nav = tabSections.map((s, i) =>
+                `<button type="button" class="analysis-tab-btn${i === 0 ? ' active' : ''}" data-tab="${s.key}">${s.label}</button>`
+            ).join('');
+
+            const panels = tabSections.map((s, i) => `
+                <div class="analysis-tab-panel${i === 0 ? ' active' : ''}" data-panel="${s.key}">
+                    <ul>
+                        ${s.items.map((item) => `<li>${item}</li>`).join('')}
+                    </ul>
+                </div>
+            `).join('');
+
+            listsTabsSection = `
+                <div class="result-block result-block--tabs" data-analysis-tabs>
+                    <h3 class="analysis-tabs-heading">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                        </svg>
+                        Детали анализа
+                    </h3>
+                    <div class="analysis-tabs-nav" role="tablist">${nav}</div>
+                    <div class="analysis-tabs-panels">${panels}</div>
+                </div>
+            `;
+        }
+
         return `
-            ${this.renderResultBlock('Сильные стороны', analysis.strengths, 'strengths')}
-            ${this.renderResultBlock('Слабые стороны', analysis.weaknesses, 'weaknesses')}
-            ${this.renderResultBlock('Уникальные предложения', analysis.unique_offers, 'unique')}
-            ${this.renderResultBlock('Рекомендации', analysis.recommendations, 'recommendations')}
+            ${scoresSection}
+            ${audienceSection}
+            ${this.renderResultBlock('Автоматизация процессов', analysis.automation_potential || [], 'automation', true)}
+            ${listsTabsSection}
             ${analysis.summary ? `
-                <div class="result-block result-summary">
+                <div class="result-block result-summary result-block--compact">
                     <h3>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -206,27 +341,28 @@ const ui = {
     
     renderParsedContent(data) {
         const parsed = data;
-        
-        return `
-            <div class="parsed-content">
-                <div class="label">URL:</div>
-                <div class="value">${parsed.url}</div>
-                
-                <div class="label">Title:</div>
-                <div class="value">${parsed.title || 'Не найден'}</div>
-                
-                <div class="label">H1:</div>
-                <div class="value">${parsed.h1 || 'Не найден'}</div>
-                
-                <div class="label">Первый абзац:</div>
-                <div class="value">${parsed.first_paragraph || 'Не найден'}</div>
-            </div>
-            
-            ${parsed.analysis ? this.renderTextAnalysis(parsed.analysis) : ''}
+        const analysisHtml = parsed.analysis ? this.renderTextAnalysis(parsed.analysis) : '';
+
+        const technicalHtml = `
+            <details class="parse-meta-details">
+                <summary class="parse-meta-summary">Технические данные страницы</summary>
+                <div class="parsed-content parse-meta-inner">
+                    <div class="label">URL:</div>
+                    <div class="value">${parsed.url}</div>
+                    <div class="label">Title:</div>
+                    <div class="value">${parsed.title || 'Не найден'}</div>
+                    <div class="label">H1:</div>
+                    <div class="value">${parsed.h1 || 'Не найден'}</div>
+                    <div class="label">Первый абзац:</div>
+                    <div class="value">${parsed.first_paragraph || 'Не найден'}</div>
+                </div>
+            </details>
         `;
+
+        return `${analysisHtml}${technicalHtml}`;
     },
     
-    renderResultBlock(title, items, type) {
+    renderResultBlock(title, items, type, compact = false) {
         if (!items || items.length === 0) return '';
         
         const icons = {
@@ -234,11 +370,14 @@ const ui = {
             weaknesses: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
             unique: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
             recommendations: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
-            insights: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'
+            insights: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+            automation: '<path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="3"/>'
         };
+
+        const blockClass = compact ? 'result-block result-block--compact' : 'result-block';
         
         return `
-            <div class="result-block">
+            <div class="${blockClass}">
                 <h3>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         ${icons[type] || icons.recommendations}
@@ -449,11 +588,15 @@ const handlers = {
             const result = await api.parseDemo(url);
             
             if (result.success && result.data) {
+                const displayUrl = result.data.url || url;
+                ui.collapseParseForm(displayUrl);
                 ui.showResults(ui.renderParsedContent(result.data));
             } else {
+                ui.expandParseForm();
                 ui.showError(result.error || 'Не удалось распарсить сайт');
             }
         } catch (error) {
+            ui.expandParseForm();
             ui.showError('Ошибка соединения с сервером');
             console.error(error);
         } finally {
@@ -505,6 +648,9 @@ function init() {
     elements.urlInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') handlers.handleParse.call(handlers);
     });
+    if (elements.parseEditBtn) {
+        elements.parseEditBtn.addEventListener('click', () => ui.expandParseForm());
+    }
     
     // History
     elements.clearHistoryBtn.addEventListener('click', handlers.handleClearHistory.bind(handlers));

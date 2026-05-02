@@ -219,95 +219,62 @@ async def analyze_image(file: UploadFile = File(...)):
 
 
 @app.post("/parse_demo", response_model=ParseDemoResponse)
+@app.post("/parse/demo", response_model=ParseDemoResponse)
 async def parse_demo(request: ParseDemoRequest):
     """
-    Парсинг и анализ сайта конкурента через Chrome
+    Selenium (Chrome, не headless): скриншот + видимый текст → тот же HR/EdTech JSON, что у /analyze_text.
     """
-    logger.info("=" * 50)
-    logger.info("🌐 API: ПАРСИНГ САЙТА")
-    logger.info(f"  URL: {request.url}")
-    
+    logger.info(f"🌐 parse_demo: {request.url}")
+
     try:
-        total_start = time.time()
-        
-        # Открываем страницу в Chrome и делаем скриншот
-        logger.info("  🔍 Запуск парсинга...")
-        parse_start = time.time()
-        title, h1, first_paragraph, screenshot_bytes, error = await parser_service.parse_url(request.url)
-        parse_elapsed = time.time() - parse_start
-        logger.info(f"  ✓ Парсинг завершён за {parse_elapsed:.2f} сек")
-        
-        if error:
-            logger.error(f"  ❌ Ошибка парсинга: {error}")
-            logger.info("=" * 50)
-            return ParseDemoResponse(
-                success=False,
-                error=error
-            )
-        
-        logger.info(f"  📌 Title: {title[:50] if title else 'N/A'}...")
-        logger.info(f"  📌 H1: {h1[:50] if h1 else 'N/A'}...")
-        logger.info(f"  📌 Screenshot: {len(screenshot_bytes) / 1024:.1f} KB" if screenshot_bytes else "  📌 Screenshot: N/A")
-        
-        # Конвертируем скриншот в base64
-        screenshot_base64 = parser_service.screenshot_to_base64(screenshot_bytes) if screenshot_bytes else None
-        
-        # Анализируем сайт через Vision API (скриншот + контекст)
-        logger.info("  🤖 Запуск AI анализа...")
-        ai_start = time.time()
-        
+        parsed = await parser_service.parse_url(request.url)
+
+        if parsed.error:
+            return ParseDemoResponse(success=False, error=parsed.error)
+
+        screenshot_base64 = None
+        if parsed.screenshot_bytes:
+            screenshot_base64 = parser_service.screenshot_to_base64(parsed.screenshot_bytes)
+
+        text_excerpt = parser_service.excerpt_page_text(parsed.page_visible_text)
+
         if screenshot_base64:
-            analysis = await openai_service.analyze_website_screenshot(
+            analysis = await openai_service.analyze_website_screenshot_and_text(
                 screenshot_base64=screenshot_base64,
                 url=request.url,
-                title=title,
-                h1=h1,
-                first_paragraph=first_paragraph
+                page_visible_text=parsed.page_visible_text or "",
+                title=parsed.title,
+                h1=parsed.h1,
             )
+        elif parsed.page_visible_text and len(parsed.page_visible_text.strip()) >= 10:
+            analysis = await openai_service.analyze_text(parsed.page_visible_text)
         else:
-            logger.warning("  ⚠ Скриншот недоступен, fallback на текстовый анализ")
-            analysis = await openai_service.analyze_parsed_content(
-                title=title,
-                h1=h1,
-                paragraph=first_paragraph
+            return ParseDemoResponse(
+                success=False,
+                error="Не удалось получить скриншот и достаточный текст страницы для анализа.",
             )
-        
-        ai_elapsed = time.time() - ai_start
-        logger.info(f"  ✓ AI анализ завершён за {ai_elapsed:.2f} сек")
-        
+
         parsed_content = ParsedContent(
             url=request.url,
-            title=title,
-            h1=h1,
-            first_paragraph=first_paragraph,
-            analysis=analysis
+            title=parsed.title,
+            h1=parsed.h1,
+            first_paragraph=parsed.first_paragraph,
+            page_text_excerpt=text_excerpt,
+            analysis=analysis,
         )
-        
-        # Сохраняем в историю
-        logger.info("  💾 Сохранение в историю...")
+
         history_service.add_entry(
             request_type="parse",
             request_summary=f"URL: {request.url}",
-            response_summary=analysis.summary[:100] if analysis.summary else f"Title: {title or 'N/A'}"
+            response_summary=analysis.summary[:100]
+            if analysis.summary
+            else f"Title: {parsed.title or 'N/A'}",
         )
-        
-        total_elapsed = time.time() - total_start
-        logger.info(f"  ✅ УСПЕХ: Парсинг и анализ завершён за {total_elapsed:.2f} сек")
-        logger.info(f"    - Парсинг: {parse_elapsed:.2f} сек")
-        logger.info(f"    - AI анализ: {ai_elapsed:.2f} сек")
-        logger.info("=" * 50)
-        
-        return ParseDemoResponse(
-            success=True,
-            data=parsed_content
-        )
+
+        return ParseDemoResponse(success=True, data=parsed_content)
     except Exception as e:
-        logger.error(f"  ❌ ОШИБКА: {e}")
-        logger.error("=" * 50)
-        return ParseDemoResponse(
-            success=False,
-            error=str(e)
-        )
+        logger.error(f"parse_demo: {e}")
+        return ParseDemoResponse(success=False, error=str(e))
 
 
 @app.get("/history", response_model=HistoryResponse)

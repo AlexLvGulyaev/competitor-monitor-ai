@@ -142,24 +142,30 @@
                             <h2>Парсинг сайта конкурента</h2>
                             <p>Введите URL сайта для автоматического извлечения и анализа контента</p>
                         </div>
-                        <div class="card-body">
-                            <div class="form-group">
-                                <label for="url-input">URL сайта</label>
-                                <div class="input-group">
-                                    <span class="input-prefix">https://</span>
-                                    <input 
-                                        type="text" 
-                                        id="url-input" 
-                                        placeholder="example.com"
-                                    >
-                                </div>
+                        <div class="card-body parse-card-body">
+                            <div class="parse-compact-bar" id="parse-compact-bar" hidden>
+                                <span class="parse-compact-url" id="parse-compact-url" title=""></span>
+                                <button type="button" class="btn btn-secondary parse-edit-btn" id="parse-edit-btn">Изменить</button>
                             </div>
-                            <button class="btn btn-primary" id="parse-btn">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                                </svg>
-                                Парсить и анализировать
-                            </button>
+                            <div id="parse-form-wrapper">
+                                <div class="form-group">
+                                    <label for="url-input">URL сайта</label>
+                                    <div class="input-group">
+                                        <span class="input-prefix">https://</span>
+                                        <input 
+                                            type="text" 
+                                            id="url-input" 
+                                            placeholder="example.com"
+                                        >
+                                    </div>
+                                </div>
+                                <button class="btn btn-primary" id="parse-btn">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                                    </svg>
+                                    Парсить и анализировать
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -210,21 +216,17 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="card-body">
+                        <div class="card-body results-card-body">
+                            <div class="results-loading" id="results-loading" hidden>
+                                <div class="spinner"></div>
+                                <p>Анализирую данные...</p>
+                            </div>
                             <div id="results-content"></div>
                         </div>
                     </div>
                 </section>
             </div>
         </main>
-    </div>
-
-    <!-- Loading Overlay -->
-    <div class="loading-overlay" id="loading-overlay" style="display: none;">
-        <div class="loading-spinner">
-            <div class="spinner"></div>
-            <p>Анализирую данные...</p>
-        </div>
     </div>
 
     <script src="/static/app.js"></script>

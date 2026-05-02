@@ -17,6 +17,48 @@ from backend.models.schemas import CompetitorAnalysis, ImageAnalysis
 # Логгер для сервиса
 logger = logging.getLogger("competitor_monitor.openai")
 
+_HR_SHARED_CRITERIA = """• удобство и ценность для работодателей (размещение, отбор, бренд работодателя, отчётность);
+• удобство для кандидатов (поиск, отклики, прозрачность условий, обучение, поддержка);
+• влияние на скорость найма и качество воронки;
+• автоматизацию процессов (скрининг, расписания, напоминания, интеграции, боты, аналитика, ИИ)."""
+
+_HR_JSON_RESPONSE_SPEC = """Верни один валидный JSON-объект строго такой структуры (без Markdown, без комментариев, без текста до или после объекта):
+{
+    "strengths": ["сильная сторона 1", "сильная сторона 2", "сильная сторона 3"],
+    "weaknesses": ["слабая сторона 1", "слабая сторона 2", "слабая сторона 3"],
+    "unique_offers": ["уникальное предложение 1", "уникальное предложение 2", "уникальное предложение 3"],
+    "recommendations": ["рекомендация 1", "рекомендация 2", "рекомендация 3"],
+    "summary": "Краткое резюме анализа",
+    "design_score": 7,
+    "ux_score": 7,
+    "hr_relevance_score": 7,
+    "target_audience": "Краткое описание ЦА: работодатели / кандидаты / HR-отделы / EdTech и т.д.",
+    "automation_potential": ["идея автоматизации 1", "идея автоматизации 2", "идея автоматизации 3"]
+}
+
+Требования:
+- strengths, weaknesses, unique_offers, recommendations: по 3–5 пунктов, на русском языке, конкретно и по делу.
+- automation_potential: 3–5 идей автоматизации или интеграций, вытекающих из материала.
+- design_score, ux_score, hr_relevance_score: целые числа от 0 до 10. design_score — сила подачи и доверия к бренду: при анализе только текста оценивай ясность и убедительность; если есть скриншот — учитывай и визуальный дизайн. ux_score — удобство сценариев для работодателя и кандидата (по тексту и по скриншоту, если он есть). hr_relevance_score — релевантность для HR, найма, карьеры или EdTech.
+- target_audience: одна связная строка.
+- Все ключи из примера обязательно присутствуют в ответе."""
+
+# Системный промпт: анализ текста (HR / EdTech, строгий JSON)
+TEXT_ANALYSIS_SYSTEM_PROMPT = f"""Ты — эксперт по продуктам и конкурентному анализу в нише HR, карьерных сервисов и EdTech (доски вакансий, ATS, рекрутинг, обучение и переквалификация, карьерные треки, менторство, B2B-сервисы для HR).
+
+Проанализируй предоставленный текст конкурента. Оценивай не «продукт вообще», а в том числе:
+{_HR_SHARED_CRITERIA}
+
+{_HR_JSON_RESPONSE_SPEC}"""
+
+# Тот же JSON, что и у анализа текста: скриншот + видимый текст страницы
+SELENIUM_PAGE_ANALYSIS_SYSTEM_PROMPT = f"""Ты — эксперт по продуктам и конкурентному анализу в нише HR, карьерных сервисов и EdTech (доски вакансий, ATS, рекрутинг, обучение и переквалификация, карьерные треки, менторство, B2B-сервисы для HR).
+
+Ты получаешь скриншот веб-страницы (изображение) и извлечённый видимый текст этой страницы в том же пользовательском сообщении. Сопоставь визуал и текст как единое целое. Оценивай не «продукт вообще», а в том числе:
+{_HR_SHARED_CRITERIA}
+
+{_HR_JSON_RESPONSE_SPEC}"""
+
 
 class OpenAIService:
     """Сервис для анализа через ProxyAPI"""
@@ -27,9 +69,8 @@ class OpenAIService:
         logger.info(f"  Base URL: {settings.proxy_api_base_url}")
         logger.info(f"  Модель текста: {settings.openai_model}")
         logger.info(f"  Модель vision: {settings.openai_vision_model}")
-        logger.info(f"  API ключ: {'*' * 10}...{settings.proxy_api_key[-4:] if settings.proxy_api_key else 'НЕ ЗАДАН'}")
-        
-        # ProxyAPI - OpenAI-совместимый API для России
+        logger.info("  API ключ ProxyAPI: настроен (значение не логируется)")
+
         self.client = OpenAI(
             api_key=settings.proxy_api_key,
             base_url=settings.proxy_api_base_url
@@ -64,7 +105,11 @@ class OpenAIService:
             logger.warning(f"Ошибка парсинга JSON: {e}")
             logger.debug(f"Проблемный контент: {content[:200]}...")
             return {}
-    
+
+    def _competitor_analysis_from_parsed_json(self, data: dict) -> CompetitorAnalysis:
+        """Собрать CompetitorAnalysis из словаря ответа LLM (валидация Pydantic)."""
+        return CompetitorAnalysis.model_validate(data)
+
     async def analyze_text(self, text: str) -> CompetitorAnalysis:
         """Анализ текста конкурента"""
         logger.info("=" * 50)
@@ -72,22 +117,6 @@ class OpenAIService:
         logger.info(f"  Длина текста: {len(text)} символов")
         logger.info(f"  Превью: {text[:100]}...")
         logger.info(f"  Модель: {self.model}")
-        
-        system_prompt = """Ты — эксперт по конкурентному анализу. Проанализируй предоставленный текст конкурента и верни структурированный JSON-ответ.
-
-Формат ответа (строго JSON):
-{
-    "strengths": ["сильная сторона 1", "сильная сторона 2", ...],
-    "weaknesses": ["слабая сторона 1", "слабая сторона 2", ...],
-    "unique_offers": ["уникальное предложение 1", "уникальное предложение 2", ...],
-    "recommendations": ["рекомендация 1", "рекомендация 2", ...],
-    "summary": "Краткое резюме анализа"
-}
-
-Важно:
-- Каждый массив должен содержать 3-5 пунктов
-- Пиши на русском языке
-- Будь конкретен и практичен в рекомендациях"""
 
         start_time = time.time()
         logger.info("  Отправка запроса к API...")
@@ -96,11 +125,12 @@ class OpenAIService:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": system_prompt},
+                    {"role": "system", "content": TEXT_ANALYSIS_SYSTEM_PROMPT},
                     {"role": "user", "content": f"Проанализируй текст конкурента:\n\n{text}"}
                 ],
                 temperature=0.7,
-                max_tokens=2000
+                max_tokens=3000,
+                response_format={"type": "json_object"},
             )
             
             elapsed = time.time() - start_time
@@ -112,13 +142,7 @@ class OpenAIService:
             
             data = self._parse_json_response(content)
             
-            result = CompetitorAnalysis(
-                strengths=data.get("strengths", []),
-                weaknesses=data.get("weaknesses", []),
-                unique_offers=data.get("unique_offers", []),
-                recommendations=data.get("recommendations", []),
-                summary=data.get("summary", "")
-            )
+            result = self._competitor_analysis_from_parsed_json(data)
             
             logger.info(f"  Результат: {len(result.strengths)} сильных, {len(result.weaknesses)} слабых сторон")
             logger.info("=" * 50)
@@ -241,6 +265,69 @@ class OpenAIService:
             )
         
         return await self.analyze_text(combined_text)
+
+    async def analyze_website_screenshot_and_text(
+        self,
+        screenshot_base64: str,
+        url: str,
+        page_visible_text: str,
+        title: Optional[str] = None,
+        h1: Optional[str] = None,
+    ) -> CompetitorAnalysis:
+        """
+        Анализ страницы по скриншоту (PNG, base64) и видимому тексту.
+        Тот же JSON CompetitorAnalysis, что и у analyze_text (HR / EdTech).
+        """
+        logger.info("🌐 Анализ страницы: скриншот + видимый текст")
+        max_chars = 18000
+        text_for_model = (page_visible_text or "").strip()
+        if len(text_for_model) > max_chars:
+            text_for_model = text_for_model[:max_chars] + "\n\n[…текст усечён…]"
+
+        meta_lines = [f"URL: {url}"]
+        if title:
+            meta_lines.append(f"Title: {title}")
+        if h1:
+            meta_lines.append(f"H1: {h1}")
+        meta_lines.append("--- Видимый текст страницы ---")
+        meta_lines.append(text_for_model if text_for_model else "(текст не извлечён)")
+
+        user_text = "\n".join(meta_lines)
+
+        start_time = time.time()
+        try:
+            response = self.client.chat.completions.create(
+                model=self.vision_model,
+                messages=[
+                    {"role": "system", "content": SELENIUM_PAGE_ANALYSIS_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": user_text,
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{screenshot_base64}",
+                                },
+                            },
+                        ],
+                    },
+                ],
+                temperature=0.7,
+                max_tokens=3500,
+                response_format={"type": "json_object"},
+            )
+            elapsed = time.time() - start_time
+            logger.info(f"  ✓ Ответ vision за {elapsed:.2f} сек")
+            content = response.choices[0].message.content
+            data = self._parse_json_response(content)
+            return self._competitor_analysis_from_parsed_json(data)
+        except Exception as e:
+            logger.error(f"  ✗ Ошибка анализа страницы (vision): {e}")
+            raise
     
     async def analyze_website_screenshot(
         self,
@@ -270,31 +357,13 @@ class OpenAIService:
         
         context = "\n".join(context_parts)
         logger.debug(f"  Контекст:\n{context}")
-        
-        system_prompt = """Ты — эксперт по конкурентному анализу и UX/UI дизайну. Проанализируй скриншот сайта конкурента и верни структурированный JSON-ответ.
 
-Формат ответа (строго JSON):
-{
-    "strengths": ["сильная сторона 1", "сильная сторона 2", ...],
-    "weaknesses": ["слабая сторона 1", "слабая сторона 2", ...],
-    "unique_offers": ["уникальное предложение/фича 1", "уникальное предложение/фича 2", ...],
-    "recommendations": ["рекомендация 1", "рекомендация 2", ...],
-    "summary": "Комплексное резюме анализа сайта конкурента"
-}
+        screenshot_only_intro = f"""Ты — эксперт по продуктам и конкурентному анализу в нише HR, карьерных сервисов и EdTech.
 
-При анализе обращай внимание на:
-- Дизайн и визуальный стиль (цвета, шрифты, композиция)
-- UX/UI: навигация, расположение элементов, CTA кнопки
-- Контент: заголовки, тексты, призывы к действию
-- Уникальные торговые предложения (УТП)
-- Целевая аудитория (на кого ориентирован сайт)
-- Технологичность и современность дизайна
+По скриншоту сайта (дополнительно краткий контекст ниже) оцени продукт. Оценивай не «продукт вообще», а в том числе:
+{_HR_SHARED_CRITERIA}
 
-Важно:
-- Каждый массив должен содержать 4-6 конкретных пунктов
-- Пиши на русском языке
-- Будь конкретен и практичен
-- Давай actionable рекомендации"""
+{_HR_JSON_RESPONSE_SPEC}"""
 
         start_time = time.time()
         logger.info("  Отправка скриншота в Vision API...")
@@ -303,7 +372,7 @@ class OpenAIService:
             response = self.client.chat.completions.create(
                 model=self.vision_model,
                 messages=[
-                    {"role": "system", "content": system_prompt},
+                    {"role": "system", "content": screenshot_only_intro},
                     {
                         "role": "user",
                         "content": [
@@ -314,14 +383,15 @@ class OpenAIService:
                             {
                                 "type": "image_url",
                                 "image_url": {
-                                    "url": f"data:image/jpeg;base64,{screenshot_base64}"
+                                    "url": f"data:image/png;base64,{screenshot_base64}"
                                 }
                             }
                         ]
                     }
                 ],
                 temperature=0.7,
-                max_tokens=3000
+                max_tokens=3500,
+                response_format={"type": "json_object"},
             )
             
             elapsed = time.time() - start_time
@@ -332,13 +402,7 @@ class OpenAIService:
             
             data = self._parse_json_response(content)
             
-            result = CompetitorAnalysis(
-                strengths=data.get("strengths", []),
-                weaknesses=data.get("weaknesses", []),
-                unique_offers=data.get("unique_offers", []),
-                recommendations=data.get("recommendations", []),
-                summary=data.get("summary", "")
-            )
+            result = self._competitor_analysis_from_parsed_json(data)
             
             logger.info(f"  Результат:")
             logger.info(f"    - Сильных сторон: {len(result.strengths)}")

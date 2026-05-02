@@ -1,3 +1,6 @@
+# Secrets (корень проекта)
+.env
+
 # Python
 __pycache__/
 *.py[cod]
@@ -12,9 +15,15 @@ env/
 .idea/
 .vscode/
 
+# Logs / runtime
+history.json
+desktop/backend_startup.log
+
 # Builds / binaries
 dist/
 build/
+desktop/dist/
+desktop/build/
 *.exe
 
 # OS junk

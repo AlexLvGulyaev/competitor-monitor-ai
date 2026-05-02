@@ -209,16 +209,17 @@ body::before {
 }
 
 .header {
-    padding: 32px 40px;
+    padding: 14px 40px 16px;
     border-bottom: 1px solid var(--border-color);
     background: rgba(17, 24, 39, 0.5);
     backdrop-filter: blur(10px);
 }
 
 .page-title {
-    font-size: 2rem;
+    font-size: 1.45rem;
     font-weight: 700;
-    margin-bottom: 8px;
+    margin-bottom: 2px;
+    line-height: 1.25;
     background: linear-gradient(135deg, var(--text-primary), var(--accent-secondary));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -226,8 +227,10 @@ body::before {
 }
 
 .page-subtitle {
-    color: var(--text-secondary);
-    font-size: 1rem;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    line-height: 1.35;
+    margin: 0;
 }
 
 .content {
@@ -503,7 +506,7 @@ input[type="text"]::placeholder {
 }
 
 .result-block {
-    margin-bottom: 24px;
+    margin-bottom: 16px;
     padding: 20px;
     background: var(--bg-secondary);
     border-radius: var(--radius-md);
@@ -512,6 +515,34 @@ input[type="text"]::placeholder {
 
 .result-block:last-child {
     margin-bottom: 0;
+}
+
+.result-block--compact {
+    margin-bottom: 10px;
+    padding: 12px 14px;
+}
+
+.result-block--compact h3 {
+    margin-bottom: 6px;
+    font-size: 0.95rem;
+}
+
+.result-block--compact p,
+.result-block--compact ul {
+    margin-bottom: 0;
+}
+
+.result-block--compact li:last-child {
+    margin-bottom: 0;
+}
+
+.result-block--scores {
+    padding: 14px 16px;
+    margin-bottom: 12px;
+}
+
+.result-block--scores h3 {
+    margin-bottom: 10px;
 }
 
 .result-block h3 {
@@ -564,7 +595,149 @@ input[type="text"]::placeholder {
     color: var(--text-primary);
 }
 
-/* Score indicator */
+.result-summary.result-block--compact p {
+    font-size: 1rem;
+}
+
+/* Компактная сетка оценок HR (2 колонки → 1 на узком экране) */
+.analysis-scores-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+
+.analysis-score-card {
+    padding: 10px 12px;
+    background: var(--bg-input);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.analysis-score-card--full {
+    grid-column: 1 / -1;
+}
+
+.analysis-score-card__label {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    line-height: 1.25;
+}
+
+.analysis-score-card__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.analysis-score-card__value {
+    flex-shrink: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--accent-secondary);
+    min-width: 2.5rem;
+}
+
+.analysis-score-card__bar {
+    flex: 1;
+    min-width: 0;
+    height: 6px;
+}
+
+@media (max-width: 520px) {
+    .analysis-scores-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .analysis-score-card--full {
+        grid-column: auto;
+    }
+}
+
+/* Вкладки списков анализа */
+.result-block--tabs {
+    padding: 14px 16px;
+    margin-bottom: 12px;
+}
+
+.analysis-tabs-heading {
+    margin-bottom: 10px;
+}
+
+.analysis-tabs-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.analysis-tab-btn {
+    font-family: var(--font-primary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.analysis-tab-btn:hover {
+    color: var(--text-secondary);
+    border-color: var(--accent-primary);
+}
+
+.analysis-tab-btn.active {
+    color: var(--text-primary);
+    background: rgba(6, 182, 212, 0.12);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.analysis-tabs-panels {
+    min-height: 4rem;
+}
+
+.analysis-tab-panel {
+    display: none;
+    animation: fadeIn 0.2s ease;
+}
+
+.analysis-tab-panel.active {
+    display: block;
+}
+
+.analysis-tab-panel ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.analysis-tab-panel li {
+    position: relative;
+    padding-left: 18px;
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+    line-height: 1.45;
+    font-size: 0.92rem;
+}
+
+.analysis-tab-panel li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: var(--accent-primary);
+}
+
+.analysis-tab-panel li:last-child {
+    margin-bottom: 0;
+}
+
+/* Score indicator (изображения и пр.) */
 .score-display {
     display: flex;
     align-items: center;
@@ -618,6 +791,85 @@ input[type="text"]::placeholder {
     color: var(--text-secondary);
     margin-bottom: 8px;
     padding-left: 12px;
+}
+
+/* Парсинг: компактная строка после успеха */
+.parse-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.parse-compact-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.parse-compact-url {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--accent-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.parse-edit-btn {
+    flex-shrink: 0;
+    padding: 6px 14px;
+    font-size: 0.8rem;
+}
+
+/* Технические поля парсинга — сворачиваемый блок под аналитикой */
+.parse-meta-details {
+    margin-top: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    overflow: hidden;
+}
+
+.parse-meta-summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    user-select: none;
+    transition: var(--transition-fast);
+}
+
+.parse-meta-summary::-webkit-details-marker {
+    display: none;
+}
+
+.parse-meta-summary:hover {
+    color: var(--accent-secondary);
+    background: rgba(6, 182, 212, 0.06);
+}
+
+.parse-meta-details[open] .parse-meta-summary {
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.parse-meta-inner {
+    margin: 0;
+    border-radius: 0;
+    border: none;
+    background: transparent;
+}
+
+.parse-meta-inner .value:last-child {
+    margin-bottom: 0;
 }
 
 /* === History === */
@@ -699,42 +951,38 @@ input[type="text"]::placeholder {
     white-space: nowrap;
 }
 
-/* === Loading Overlay === */
-.loading-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(10, 15, 28, 0.9);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    backdrop-filter: blur(4px);
+/* Индикатор загрузки только в карточке результатов (без fullscreen / blur) */
+.results-card-body {
+    position: relative;
 }
 
-.loading-spinner {
-    text-align: center;
+.results-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    min-height: 180px;
+}
+
+.results-loading p {
+    margin-top: 16px;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
 }
 
 .spinner {
-    width: 60px;
-    height: 60px;
+    width: 48px;
+    height: 48px;
     border: 3px solid var(--border-color);
     border-top-color: var(--accent-primary);
     border-radius: 50%;
     animation: spin 1s linear infinite;
-    margin: 0 auto 20px;
+    flex-shrink: 0;
 }
 
 @keyframes spin {
     to { transform: rotate(360deg); }
-}
-
-.loading-spinner p {
-    color: var(--text-secondary);
-    font-size: 1rem;
 }
 
 /* === Responsive === */
@@ -806,11 +1054,15 @@ input[type="text"]::placeholder {
     }
     
     .header {
-        padding: 20px;
+        padding: 12px 16px 14px;
     }
     
     .page-title {
-        font-size: 1.5rem;
+        font-size: 1.25rem;
+    }
+
+    .page-subtitle {
+        font-size: 0.78rem;
     }
     
     .content {
