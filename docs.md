@@ -79,6 +79,7 @@ http://localhost:8000
 | GET | `/history` | История последних запросов |
 | DELETE | `/history` | Очистка истории |
 | GET | `/health` | Проверка работоспособности (используется desktop и мониторингом) |
+| POST | `/export_pdf` | Экспорт анализа в PDF (нужен TTF с кириллицей, см. раздел «Конфигурация») |
 | GET | `/docs` | Swagger UI |
 | GET | `/redoc` | ReDoc |
 
@@ -423,6 +424,12 @@ curl -X GET "http://localhost:8000/health"
 | `API_PORT` | Порт HTTP-сервера | `8000` |
 
 Шаблон см. в файле `.env.example` в корне проекта.
+
+### Экспорт PDF
+
+Для `POST /export_pdf` ReportLab подключает TTF с кириллицей: сначала ищутся файлы в `backend/assets/fonts/`, при отсутствии — системные `arial.ttf` и `arialbd.ttf` в `%WINDIR%\Fonts` (Windows). Если ни один подходящий шрифт не найден, API возвращает **503** с текстом `PDF font with Cyrillic support not found`. Файлы шрифтов из системы в Git не коммитятся — см. `backend/assets/fonts/.gitkeep` и `README.md`.
+
+Тело запроса `ExportPdfRequest`: `pdf_export_kind` можно не указывать — тогда подставляется `image` при `kind=image`, при `kind=competitor` и непустом `site_host` — `site`, иначе `text`. Поле `source_text` опционально и не участвует в обязательной проверке; пустые строки приводятся к отсутствию значения. Имя файла в `Content-Disposition`: `analysis_text.pdf`, `analysis_site_<host>.pdf`, `analysis_image.pdf` или `analysis_report.pdf`, если хост пуст. Раздел «Исходный текст» в PDF только при режиме `text` и непустом `source_text`.
 
 ### ProxyAPI
 

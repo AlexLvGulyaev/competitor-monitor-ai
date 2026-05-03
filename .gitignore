@@ -26,6 +26,11 @@ desktop/dist/
 desktop/build/
 *.exe
 
+# Примеры PDF в docs/examples намеренно коммитятся — не добавляйте правило *.pdf на весь репозиторий
+
 # OS junk
 .DS_Store
 Thumbs.db
+
+backend/assets/fonts/*.ttf
+backend/assets/fonts/*.otf

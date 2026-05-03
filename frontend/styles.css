@@ -347,6 +347,19 @@ body::before {
     align-items: center;
 }
 
+.results-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.btn-export-pdf {
+    font-size: 0.8rem;
+    padding: 8px 12px;
+    white-space: nowrap;
+}
+
 .card-body {
     padding: 24px;
 }

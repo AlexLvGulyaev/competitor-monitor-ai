@@ -2,8 +2,9 @@
 Pydantic схемы для API
 """
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Any, List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # === Запросы ===
@@ -147,4 +148,77 @@ class HistoryResponse(BaseModel):
     """Ответ со списком истории"""
     items: List[HistoryItem]
     total: int
+
+
+class ExportPdfRequest(BaseModel):
+    """Экспорт PDF: либо CompetitorAnalysis (текст/сайт), либо ImageAnalysis."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    title: str = Field(..., min_length=1, description="Заголовок отчёта на первой странице PDF")
+    kind: Literal["competitor", "image"] = "competitor"
+    competitor: Optional[CompetitorAnalysis] = None
+    image: Optional[ImageAnalysis] = None
+    pdf_export_kind: Optional[Literal["text", "site", "image"]] = Field(
+        default=None,
+        description="Режим имени файла; если не указан — определяется по kind и site_host",
+    )
+    site_host: Optional[str] = Field(
+        default=None,
+        description="Хост сайта для имени analysis_site_<host>.pdf (режим site)",
+    )
+    source_text: Optional[str] = Field(
+        default=None,
+        description="Исходный текст для раздела «Исходный текст» (только режим text)",
+    )
+
+    @field_validator("source_text", mode="before")
+    @classmethod
+    def _normalize_source_text(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            return s if s else None
+        return str(v).strip() or None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_pdf_export_kind(cls, data: Any) -> Any:
+        """Если pdf_export_kind не передан — выводим из kind и site_host (совместимость с клиентами)."""
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        if out.get("pdf_export_kind") is not None:
+            return out
+        kind = out.get("kind") or "competitor"
+        if kind == "image":
+            out["pdf_export_kind"] = "image"
+        elif kind == "competitor":
+            sh = out.get("site_host")
+            if isinstance(sh, str) and sh.strip():
+                out["pdf_export_kind"] = "site"
+            else:
+                out["pdf_export_kind"] = "text"
+        else:
+            out["pdf_export_kind"] = "text"
+        return out
+
+    @model_validator(mode="after")
+    def _payload_matches_kind(self) -> "ExportPdfRequest":
+        if self.kind == "competitor":
+            if self.competitor is None:
+                raise ValueError("Для kind=competitor нужно поле competitor")
+            if self.image is not None:
+                raise ValueError("Для kind=competitor поле image должно быть пустым")
+            if self.pdf_export_kind == "image":
+                raise ValueError("Для kind=competitor pdf_export_kind должен быть text или site")
+        else:
+            if self.image is None:
+                raise ValueError("Для kind=image нужно поле image")
+            if self.competitor is not None:
+                raise ValueError("Для kind=image поле competitor должно быть пустым")
+            if self.pdf_export_kind != "image":
+                raise ValueError("Для kind=image нужно pdf_export_kind=image")
+        return self
 

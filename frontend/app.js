@@ -7,7 +7,19 @@
 const state = {
     currentTab: 'text',
     selectedImage: null,
-    isLoading: false
+    isLoading: false,
+    /**
+     * @type {{
+     *   title: string,
+     *   kind: 'competitor'|'image',
+     *   pdfExportKind: 'text'|'site'|'image',
+     *   siteHost?: string,
+     *   sourceText?: string,
+     *   competitor?: object,
+     *   image?: object
+     * } | null}
+     */
+    pdfExport: null
 };
 
 // === DOM Elements ===
@@ -47,12 +59,43 @@ const elements = {
     
     resultsLoading: document.getElementById('results-loading'),
     
-    exitAppBtn: document.getElementById('exit-app-btn')
+    exitAppBtn: document.getElementById('exit-app-btn'),
+    exportPdfBtn: document.getElementById('export-pdf-btn')
 };
 
 /**
  * Вкладки списков анализа (сильные / слабые / УТП / рекомендации) внутри #results-content
  */
+/** Сегмент хоста для analysis_site_<host>.pdf (как на бэкенде). */
+function sanitizeHostForFilename(host) {
+    let h = String(host || '').trim().toLowerCase();
+    if (h.startsWith('www.')) h = h.slice(4);
+    h = h
+        .replace(/[^a-z0-9._-]+/gi, '_')
+        .replace(/_+/g, '_')
+        .replace(/^[._-]+|[._-]+$/g, '')
+        .slice(0, 48);
+    return h;
+}
+
+function suggestedPdfDownloadName(p) {
+    const k =
+        p.pdfExportKind ?? (p.kind === 'image' ? 'image' : p.siteHost ? 'site' : 'text');
+    if (k === 'image') return 'analysis_image.pdf';
+    if (k === 'text') return 'analysis_text.pdf';
+    const seg = sanitizeHostForFilename(p.siteHost || '');
+    return seg ? `analysis_site_${seg}.pdf` : 'analysis_report.pdf';
+}
+
+function hostnameFromUrl(url) {
+    try {
+        const h = new URL(url).hostname.replace(/^www\./, '');
+        return h || 'site';
+    } catch {
+        return 'site';
+    }
+}
+
 function initResultTabs(root) {
     const wrap = root.querySelector('[data-analysis-tabs]');
     if (!wrap) return;
@@ -114,6 +157,19 @@ const api = {
             method: 'DELETE'
         });
         return response.json();
+    },
+    
+    async exportPdf(payload) {
+        const response = await fetch(`${this.baseUrl}/export_pdf`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            const errText = await response.text().catch(() => '');
+            throw new Error(errText || `PDF: ${response.status}`);
+        }
+        return response.blob();
     }
 };
 
@@ -174,12 +230,23 @@ const ui = {
         initResultTabs(elements.resultsContent);
         elements.resultsSection.hidden = false;
         elements.resultsSection.scrollIntoView({ behavior: 'smooth' });
+        this.syncPdfExportButton();
     },
     
     hideResults() {
+        state.pdfExport = null;
+        this.syncPdfExportButton();
         elements.resultsSection.hidden = true;
         if (elements.resultsLoading) elements.resultsLoading.hidden = true;
         if (elements.resultsContent) elements.resultsContent.hidden = false;
+    },
+    
+    syncPdfExportButton() {
+        const btn = elements.exportPdfBtn;
+        if (!btn) return;
+        const ok = !!state.pdfExport;
+        btn.hidden = !ok;
+        btn.disabled = !ok;
     },
     
     prepareExitSession() {
@@ -193,6 +260,8 @@ const ui = {
     },
     
     showError(message) {
+        state.pdfExport = null;
+        this.syncPdfExportButton();
         const html = `
             <div class="error-message">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -490,6 +559,13 @@ const handlers = {
             const result = await api.analyzeText(text);
             
             if (result.success && result.analysis) {
+                state.pdfExport = {
+                    title: 'Анализ текста',
+                    kind: 'competitor',
+                    pdfExportKind: 'text',
+                    sourceText: text,
+                    competitor: result.analysis
+                };
                 ui.showResults(ui.renderTextAnalysis(result.analysis));
             } else {
                 ui.showError(result.error || 'Произошла ошибка при анализе');
@@ -568,6 +644,12 @@ const handlers = {
             const result = await api.analyzeImage(state.selectedImage);
             
             if (result.success && result.analysis) {
+                state.pdfExport = {
+                    title: 'Анализ изображения',
+                    kind: 'image',
+                    pdfExportKind: 'image',
+                    image: result.analysis
+                };
                 ui.showResults(ui.renderImageAnalysis(result.analysis));
             } else {
                 ui.showError(result.error || 'Произошла ошибка при анализе изображения');
@@ -601,6 +683,18 @@ const handlers = {
             
             if (result.success && result.data) {
                 const displayUrl = result.data.url || url;
+                const host = hostnameFromUrl(displayUrl);
+                if (result.data.analysis) {
+                    state.pdfExport = {
+                        title: `Анализ сайта: ${host}`,
+                        kind: 'competitor',
+                        pdfExportKind: 'site',
+                        siteHost: host,
+                        competitor: result.data.analysis
+                    };
+                } else {
+                    state.pdfExport = null;
+                }
                 ui.collapseParseForm(displayUrl);
                 ui.showResults(ui.renderParsedContent(result.data));
             } else {
@@ -633,6 +727,53 @@ const handlers = {
     // Results
     handleCloseResults() {
         ui.hideResults();
+    },
+    
+    async handleExportPdf() {
+        const p = state.pdfExport;
+        if (!p) return;
+        const exportKind =
+            p.pdfExportKind ??
+            (p.kind === 'image' ? 'image' : p.siteHost ? 'site' : 'text');
+
+        const body =
+            p.kind === 'competitor'
+                ? (() => {
+                      const o = {
+                          title: p.title,
+                          kind: 'competitor',
+                          competitor: p.competitor,
+                          pdf_export_kind: exportKind
+                      };
+                      if (exportKind === 'site') {
+                          o.site_host = p.siteHost || null;
+                      }
+                      if (exportKind === 'text' && p.sourceText != null && p.sourceText !== '') {
+                          o.source_text = p.sourceText;
+                      }
+                      return o;
+                  })()
+                : {
+                      title: p.title,
+                      kind: 'image',
+                      image: p.image,
+                      pdf_export_kind: 'image'
+                  };
+        try {
+            const blob = await api.exportPdf(body);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = suggestedPdfDownloadName(p);
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            console.error(e);
+            alert('Не удалось сформировать PDF. Проверьте соединение с сервером.');
+        }
     },
     
     handleExitApp() {
@@ -712,6 +853,9 @@ function init() {
     
     // Results
     elements.closeResultsBtn.addEventListener('click', handlers.handleCloseResults.bind(handlers));
+    if (elements.exportPdfBtn) {
+        elements.exportPdfBtn.addEventListener('click', handlers.handleExportPdf.bind(handlers));
+    }
     
     if (elements.exitAppBtn) {
         elements.exitAppBtn.addEventListener('click', handlers.handleExitApp.bind(handlers));

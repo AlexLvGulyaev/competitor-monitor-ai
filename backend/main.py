@@ -3,12 +3,14 @@
 Мониторинг конкурентов - MVP ассистент
 """
 import base64
+import re
 import time
 import logging
+from urllib.parse import quote
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 import uvicorn
 
 from backend.config import settings
@@ -19,11 +21,13 @@ from backend.models.schemas import (
     ParseDemoRequest,
     ParseDemoResponse,
     ParsedContent,
-    HistoryResponse
+    HistoryResponse,
+    ExportPdfRequest,
 )
 from backend.services.openai_service import openai_service
 from backend.services.parser_service import parser_service
 from backend.services.history_service import history_service
+from backend.services.pdf_export_service import PdfFontError, build_pdf
 
 # Логгер для API
 logger = logging.getLogger("competitor_monitor.api")
@@ -311,6 +315,61 @@ async def health_check():
         "service": "Competitor Monitor",
         "version": "1.0.0"
     }
+
+
+def _sanitize_site_host_segment(host: str) -> str:
+    """Сегмент для имени файла: только ASCII, без длинных строк."""
+    raw = (host or "").strip().lower()
+    if raw.startswith("www."):
+        raw = raw[4:]
+    slug = re.sub(r"[^a-z0-9._-]+", "_", raw)
+    slug = re.sub(r"_+", "_", slug).strip("._-")[:48]
+    return slug
+
+
+def _pdf_download_filenames(req: ExportPdfRequest) -> tuple[str, str]:
+    """
+    Короткие имена скачивания (ASCII, без кириллицы в filename=).
+    Возвращает (ascii_filename, utf8_filename для filename*).
+    """
+    k = req.pdf_export_kind
+    if k == "image":
+        name = "analysis_image.pdf"
+        return name, name
+    if k == "text":
+        name = "analysis_text.pdf"
+        return name, name
+    if k == "site":
+        seg = _sanitize_site_host_segment(req.site_host or "")
+        name = f"analysis_site_{seg}.pdf" if seg else "analysis_report.pdf"
+        return name, name
+    name = "analysis_report.pdf"
+    return name, name
+
+
+def _content_disposition_attachment_pdf(req: ExportPdfRequest) -> str:
+    ascii_fn, utf8_fn = _pdf_download_filenames(req)
+    star = quote(utf8_fn, safe="")
+    return f"attachment; filename=\"{ascii_fn}\"; filename*=UTF-8''{star}"
+
+
+@app.post("/export_pdf")
+async def export_pdf(request: ExportPdfRequest):
+    """Экспорт анализа в PDF (A4, reportlab platypus)."""
+    try:
+        pdf_bytes = build_pdf(request)
+    except PdfFontError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=str(e),
+        ) from e
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": _content_disposition_attachment_pdf(request),
+        },
+    )
 
 
 # Статические файлы для фронтенда

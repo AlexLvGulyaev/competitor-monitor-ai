@@ -19,9 +19,10 @@ from io import TextIOBase
 from pathlib import Path
 from typing import TextIO
 
-from PyQt6.QtCore import QObject, QThread, Qt, QUrl, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QObject, QStandardPaths, QThread, Qt, QUrl, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QMainWindow,
     QPushButton,
     QStackedWidget,
@@ -32,6 +33,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6 import sip
 from PyQt6.QtWebChannel import QWebChannel
+from PyQt6.QtWebEngineCore import QWebEngineDownloadRequest
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 
@@ -336,6 +338,7 @@ class MainWindow(QMainWindow):
 
         self._webview = QWebEngineView()
         prof = self._webview.page().profile()
+        prof.downloadRequested.connect(self._on_download_requested)
         _ua = prof.httpUserAgent()
         if "CompetitorMonitorDesktop" not in _ua:
             prof.setHttpUserAgent(f"{_ua} CompetitorMonitorDesktop/1.0")
@@ -396,6 +399,56 @@ class MainWindow(QMainWindow):
         self._error_message.setText(
             text + f"\n\nОжидается API: {HEALTH_URL}\nВеб-интерфейс: {WEB_UI_URL}"
         )
+
+    @staticmethod
+    def _is_pdf_export_download(download: QWebEngineDownloadRequest) -> bool:
+        name = (download.suggestedFileName() or "").lower()
+        mime = (download.mimeType() or "").lower()
+        if name.endswith(".pdf") or "pdf" in mime:
+            return True
+        url = download.url().toString()
+        if "/export_pdf" in url or url.rstrip("/").lower().endswith(".pdf"):
+            return True
+        return False
+
+    def _on_download_requested(self, download: QWebEngineDownloadRequest) -> None:
+        """QWebEngineView не сохраняет blob/attachment без явного accept() — диалог для PDF."""
+        try:
+            suggested = (download.suggestedFileName() or "").strip() or "analysis_report.pdf"
+
+            if self._is_pdf_export_download(download):
+                default_path = str(Path.home() / Path(suggested).name)
+                path, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "Сохранить PDF",
+                    default_path,
+                    "PDF (*.pdf);;Все файлы (*.*)",
+                )
+                if path:
+                    dpath = Path(path)
+                    download.setDownloadDirectory(str(dpath.parent.resolve()))
+                    download.setDownloadFileName(dpath.name)
+                    download.accept()
+                    print(f"PDF download started: {dpath.resolve()}", flush=True)
+                else:
+                    download.cancel()
+                return
+
+            dl_root = QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.DownloadLocation
+            )
+            if not dl_root:
+                dl_root = str(Path.home())
+            fname = Path(suggested).name or "download"
+            download.setDownloadDirectory(dl_root)
+            download.setDownloadFileName(fname)
+            download.accept()
+        except Exception as e:
+            print(f"[desktop] download handler error: {e}", flush=True)
+            try:
+                download.cancel()
+            except RuntimeError:
+                pass
 
     def _flush_and_close_backend_log(self) -> None:
         _close_log_file(self._backend_log_fp)
