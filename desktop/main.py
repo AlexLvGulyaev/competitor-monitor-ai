@@ -19,7 +19,7 @@ from io import TextIOBase
 from pathlib import Path
 from typing import TextIO
 
-from PyQt6.QtCore import QObject, QThread, Qt, QUrl, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, Qt, QUrl, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -30,6 +30,8 @@ from PyQt6.QtWidgets import (
     QLabel,
     QSizePolicy,
 )
+from PyQt6 import sip
+from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 
@@ -172,31 +174,65 @@ def _close_log_file(log_fp: TextIO | None) -> None:
         pass
 
 
+def _append_desktop_owned_backend_terminated_log() -> None:
+    """Маркер в консоль и в backend_startup.log после остановки процесса, запущенного desktop."""
+    print("Desktop owned backend terminated", flush=True)
+    line = f"\n--- Desktop owned backend terminated ({datetime.now().isoformat(timespec='seconds')}) ---\n"
+    try:
+        with open(BACKEND_STARTUP_LOG, "a", encoding="utf-8") as f:
+            f.write(line)
+    except OSError:
+        pass
+
+
 def _terminate_owned_backend(proc: subprocess.Popen | None) -> None:
-    """Гасим процесс, запущенный desktop; на Windows — дерево (run.py + uvicorn reload)."""
-    if proc is None or proc.poll() is not None:
+    """Гасим процесс, запущенный desktop; на Windows — дерево: taskkill /PID … /T /F."""
+    if proc is None:
         return
+    try:
+        pid = proc.pid
+    except (RuntimeError, AttributeError):
+        return
+
     if sys.platform == "win32":
         try:
             subprocess.run(
-                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
                 capture_output=True,
-                timeout=12,
+                timeout=15,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 stdin=subprocess.DEVNULL,
+                check=False,
             )
         except (OSError, subprocess.TimeoutExpired):
-            proc.kill()
+            try:
+                proc.kill()
+            except (OSError, ProcessLookupError):
+                pass
         try:
-            proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            pass
+            proc.wait(timeout=8)
+        except (subprocess.TimeoutExpired, OSError, ProcessLookupError):
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True,
+                    timeout=8,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    stdin=subprocess.DEVNULL,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
     else:
-        proc.terminate()
         try:
+            proc.terminate()
             proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        except (subprocess.TimeoutExpired, OSError, ProcessLookupError):
+            try:
+                proc.kill()
+                proc.wait(timeout=3)
+            except (OSError, ProcessLookupError):
+                pass
 
 
 class BackendBootstrapper(QObject):
@@ -255,6 +291,24 @@ class BackendBootstrapper(QObject):
         )
 
 
+class DesktopBridge(QObject):
+    """Мост JS → Python: закрытие приложения из веб-UI (кнопка «Выход»)."""
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+
+    @pyqtSlot()
+    def requestExit(self) -> None:
+        # close() гарантирует closeEvent → корректная остановка потока и subprocess; quit() — нет.
+        par = self.parent()
+        if isinstance(par, QMainWindow):
+            par.close()
+            return
+        app = QApplication.instance()
+        if app:
+            app.quit()
+
+
 class MainWindow(QMainWindow):
     """Одно окно, один QWebEngineView — URL задаётся после успешного /health."""
 
@@ -270,6 +324,7 @@ class MainWindow(QMainWindow):
         self._backend_log_fp: TextIO | None = None
         self._owns_backend = False
         self._bootstrap_thread: QThread | None = None
+        self._shutdown_finalized = False
 
         self._stack = QStackedWidget()
         self.setCentralWidget(self._stack)
@@ -280,6 +335,16 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._error_page)
 
         self._webview = QWebEngineView()
+        prof = self._webview.page().profile()
+        _ua = prof.httpUserAgent()
+        if "CompetitorMonitorDesktop" not in _ua:
+            prof.setHttpUserAgent(f"{_ua} CompetitorMonitorDesktop/1.0")
+
+        self._desktop_bridge = DesktopBridge(self)
+        self._web_channel = QWebChannel(self._webview.page())
+        self._webview.page().setWebChannel(self._web_channel)
+        self._web_channel.registerObject("desktopBridge", self._desktop_bridge)
+
         self._stack.addWidget(self._webview)
 
         self._stack.setCurrentWidget(self._loading_page)
@@ -337,9 +402,38 @@ class MainWindow(QMainWindow):
         self._backend_log_fp = None
 
     def _cleanup_bootstrap_thread(self) -> None:
-        if self._bootstrap_thread:
-            self._bootstrap_thread.quit()
-            self._bootstrap_thread.wait(3000)
+        """Идемпотентно: не вызывать quit()/wait() у удалённого QThread."""
+        thr = self._bootstrap_thread
+        self._bootstrap_thread = None
+        if thr is None:
+            return
+        try:
+            if sip.isdeleted(thr):
+                return
+        except RuntimeError:
+            return
+        try:
+            running = thr.isRunning()
+        except RuntimeError:
+            return
+        if not running:
+            return
+        try:
+            thr.quit()
+        except RuntimeError:
+            return
+        try:
+            thr.wait(4000)
+        except RuntimeError:
+            pass
+
+    def _on_bootstrap_thread_finished(self) -> None:
+        """Снять ссылку после thread.quit(); иначе deleteLater оставляет «мёртвый» указатель в self._bootstrap_thread."""
+        try:
+            sender = self.sender()
+            if sender is not None and self._bootstrap_thread is sender:
+                self._bootstrap_thread = None
+        except RuntimeError:
             self._bootstrap_thread = None
 
     def _start_bootstrap(self) -> None:
@@ -361,6 +455,7 @@ class MainWindow(QMainWindow):
 
         worker.ready.connect(_done)
         worker.failed.connect(_done)
+        thread.finished.connect(self._on_bootstrap_thread_finished)
         thread.finished.connect(thread.deleteLater)
 
         self._bootstrap_thread = thread
@@ -416,14 +511,41 @@ class MainWindow(QMainWindow):
 
         self._stack.setCurrentWidget(self._webview)
 
-    def closeEvent(self, event) -> None:  # type: ignore[override]
+    def _finalize_shutdown(self) -> None:
+        """Один раз: bootstrap thread → свой backend (taskkill /T) → лог → закрыть дескриптор лога."""
+        if self._shutdown_finalized:
+            return
+        self._shutdown_finalized = True
         self._shutting_down = True
-        self._cleanup_bootstrap_thread()
-        if self._owns_backend:
-            _terminate_owned_backend(self._backend_proc)
+
+        try:
+            self._cleanup_bootstrap_thread()
+        except RuntimeError:
+            self._bootstrap_thread = None
+
+        had_owned = self._owns_backend
+        proc = self._backend_proc
+        if had_owned:
+            if proc is not None:
+                try:
+                    _terminate_owned_backend(proc)
+                except Exception:
+                    pass
+            try:
+                _append_desktop_owned_backend_terminated_log()
+            except Exception:
+                pass
+
         self._flush_and_close_backend_log()
         self._backend_proc = None
         self._owns_backend = False
+
+    def _on_application_about_to_quit(self) -> None:
+        """Подстраховка, если quit() обойдёт closeEvent."""
+        self._finalize_shutdown()
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        self._finalize_shutdown()
         event.accept()
 
 
@@ -434,6 +556,7 @@ def main() -> int:
     app.setApplicationName("Competitor Monitor")
 
     window = MainWindow()
+    app.aboutToQuit.connect(window._on_application_about_to_quit)
     window.show()
 
     return app.exec()

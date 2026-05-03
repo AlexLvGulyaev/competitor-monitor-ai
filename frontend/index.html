@@ -64,14 +64,27 @@
                     <span class="status-dot"></span>
                     <span>Система активна</span>
                 </div>
+                <button type="button" class="btn-sidebar-exit" id="exit-app-btn" title="Завершение работы">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                        <polyline points="16 17 21 12 16 7"/>
+                        <line x1="21" y1="12" x2="9" y2="12"/>
+                    </svg>
+                    Выход
+                </button>
             </div>
         </aside>
 
         <!-- Main Content -->
         <main class="main">
             <header class="header">
-                <h1 class="page-title">Мониторинг конкурентов</h1>
-                <p class="page-subtitle">AI-ассистент для анализа конкурентной среды</p>
+                <div class="header-inner">
+                    <div class="header-titles">
+                        <h1 class="page-title">Мониторинг конкурентов</h1>
+                        <p class="page-subtitle">AI-ассистент для анализа конкурентной среды</p>
+                    </div>
+                    <a class="project-context" href="https://zerocoder.ru" target="_blank" rel="noopener noreferrer">AI-проект (Zerocoder)</a>
+                </div>
             </header>
 
             <div class="content">
@@ -229,6 +242,7 @@
         </main>
     </div>
 
+    <script src="/static/qwebchannel.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

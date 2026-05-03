@@ -45,7 +45,9 @@ const elements = {
     resultsContent: document.getElementById('results-content'),
     closeResultsBtn: document.getElementById('close-results'),
     
-    resultsLoading: document.getElementById('results-loading')
+    resultsLoading: document.getElementById('results-loading'),
+    
+    exitAppBtn: document.getElementById('exit-app-btn')
 };
 
 /**
@@ -178,6 +180,16 @@ const ui = {
         elements.resultsSection.hidden = true;
         if (elements.resultsLoading) elements.resultsLoading.hidden = true;
         if (elements.resultsContent) elements.resultsContent.hidden = false;
+    },
+    
+    prepareExitSession() {
+        if (state.isLoading) {
+            state.isLoading = false;
+            if (elements.resultsLoading) elements.resultsLoading.hidden = true;
+            if (elements.resultsContent) elements.resultsContent.hidden = false;
+        }
+        this.hideResults();
+        this.showTab('text');
     },
     
     showError(message) {
@@ -621,8 +633,51 @@ const handlers = {
     // Results
     handleCloseResults() {
         ui.hideResults();
+    },
+    
+    handleExitApp() {
+        handleExitClick();
     }
 };
+
+function initDesktopBridge() {
+    if (typeof qt === 'undefined' || typeof qt.webChannelTransport === 'undefined') {
+        return;
+    }
+    if (typeof QWebChannel === 'undefined') {
+        return;
+    }
+    try {
+        new QWebChannel(qt.webChannelTransport, function (channel) {
+            window.__desktopBridge = channel.objects.desktopBridge;
+        });
+    } catch (e) {
+        console.warn('QWebChannel:', e);
+    }
+}
+
+function showExitMessageForEnvironment() {
+    if (/CompetitorMonitorDesktop/i.test(navigator.userAgent)) {
+        alert('Приложение можно закрыть кнопкой окна');
+    } else {
+        alert('Закройте вкладку браузера для завершения работы');
+    }
+}
+
+function handleExitClick() {
+    ui.prepareExitSession();
+
+    if (window.__desktopBridge && typeof window.__desktopBridge.requestExit === 'function') {
+        try {
+            window.__desktopBridge.requestExit();
+        } catch (e) {
+            showExitMessageForEnvironment();
+        }
+        return;
+    }
+
+    showExitMessageForEnvironment();
+}
 
 // === Initialize ===
 function init() {
@@ -658,8 +713,14 @@ function init() {
     // Results
     elements.closeResultsBtn.addEventListener('click', handlers.handleCloseResults.bind(handlers));
     
+    if (elements.exitAppBtn) {
+        elements.exitAppBtn.addEventListener('click', handlers.handleExitApp.bind(handlers));
+    }
+    
     // Show default tab
     ui.showTab('text');
+    
+    initDesktopBridge();
 }
 
 // Start app
